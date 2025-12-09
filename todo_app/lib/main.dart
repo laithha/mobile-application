@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'database/task_repository.dart';
+import 'database/task_model.dart';
 
 void main() {
   runApp(ToDoApp());
@@ -19,37 +21,48 @@ class ToDoApp extends StatelessWidget {
   }
 }
 
-class Task {
-  String title;
-  String description;
-  String priority;
-  Task(this.title, this.description, this.priority);
-}
-
 class TaskListScreen extends StatefulWidget {
   @override
   State<TaskListScreen> createState() => _TaskListScreenState();
 }
 
 class _TaskListScreenState extends State<TaskListScreen> {
-  List<Task> tasks = [];
+  List<TaskModel> tasks = [];
   String selectedFilter = "All";
+  final TaskRepository repo = TaskRepository();
 
-  void _addTask(Task task) {
+  @override
+  void initState() {
+    super.initState();
+    loadTasks();
+  }
+
+  Future<void> loadTasks() async {
+    tasks = await repo.getAllTasks();
+    setState(() {});
+  }
+
+  Future<void> _addTask(TaskModel task) async {
+    final id = await repo.insertTask(task);
+    task.id = id;
+    tasks.add(task);
     setState(() {
-      tasks.add(task);
+    });
+
+  }
+
+  Future<void> _updateTask(TaskModel task) async {
+    await repo.updateTask(task);
+    final index = tasks.indexWhere((t) => t.id== task.id);
+    tasks[index] = task;
+    setState(() {
     });
   }
 
-  void _updateTask(int index, Task updatedTask) {
+  Future<void> _deleteTask(int id) async {
+    await repo.deleteTask(id);
+    tasks.removeWhere((t) => t.id == id);
     setState(() {
-      tasks[index] = updatedTask;
-    });
-  }
-
-  void _deleteTask(int index) {
-    setState(() {
-      tasks.removeAt(index);
     });
   }
 
@@ -58,25 +71,51 @@ class _TaskListScreenState extends State<TaskListScreen> {
       context,
       MaterialPageRoute(builder: (context) => AddEditTaskScreen()),
     );
+
     if (newTask != null) _addTask(newTask);
   }
 
-  void _navigateToEditTask(int index) async {
+  void _navigateToEditTask(TaskModel task) async {
     final updatedTask = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => AddEditTaskScreen(task: tasks[index]),
-      ),
+      MaterialPageRoute(builder: (context) => AddEditTaskScreen(task: task)),
     );
-    if (updatedTask != null) _updateTask(index, updatedTask);
+
+    if (updatedTask != null) _updateTask(updatedTask);
   }
 
-  List<Task> get filteredTasks {
+  List<TaskModel> get filteredTasks {
     if (selectedFilter == "All") return tasks;
     return tasks.where((t) => t.priority == selectedFilter).toList();
   }
 
-  Widget _priorityTag(String priority) {
+  void _confirmDelete(int id )async{
+    final shouldDelete = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text('Delete Task'),
+            content: Text('are you sure that you want to delete this task?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text('cancel'),
+              ),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: Text('delete')
+              ),
+            ],
+          );
+        },
+    );
+
+    if(shouldDelete == true){
+      _deleteTask(id);
+    }
+}
+
+Widget _priorityTag(String priority) {
     Color bg;
     switch (priority) {
       case 'High':
@@ -105,9 +144,10 @@ class _TaskListScreenState extends State<TaskListScreen> {
     );
   }
 
-  Widget _buildTaskCard(Task task, int index) {
+  Widget _buildTaskCard(TaskModel task) {
+
     return GestureDetector(
-      onTap: () => _navigateToEditTask(index),
+      onTap: () => _navigateToEditTask(task),
       child: Card(
         elevation: 0,
         margin: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -138,7 +178,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
               Align(
                 alignment: Alignment.bottomRight,
                 child: TextButton(
-                  onPressed: () => _deleteTask(index),
+                  onPressed: () => _confirmDelete(task.id!),
                   child: Text(
                     "Delete Task",
                     style: TextStyle(color: Colors.red, fontSize: 13),
@@ -201,16 +241,13 @@ class _TaskListScreenState extends State<TaskListScreen> {
             ),
             SizedBox(height: 8),
             Expanded(
-              child: filteredTasks.isEmpty
+              child: tasks.isEmpty
                   ? Center(child: Text("No tasks found"))
                   : ListView.builder(
                       itemCount: filteredTasks.length,
                       itemBuilder: (context, index) {
                         final task = filteredTasks[index];
-                        final originalIndex = tasks.indexWhere(
-                          (t) => t == task,
-                        );
-                        return _buildTaskCard(task, originalIndex);
+                        return _buildTaskCard(task);
                       },
                     ),
             ),
@@ -238,7 +275,8 @@ class _TaskListScreenState extends State<TaskListScreen> {
 }
 
 class AddEditTaskScreen extends StatefulWidget {
-  final Task? task;
+  final TaskModel? task;
+
   AddEditTaskScreen({this.task});
 
   @override
@@ -264,11 +302,13 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
     if (titleController.text.isEmpty || descriptionController.text.isEmpty)
       return;
 
-    final newTask = Task(
-      titleController.text,
-      descriptionController.text,
-      priority,
+    final newTask = TaskModel(
+      id: widget.task?.id,
+      title: titleController.text,
+      description: descriptionController.text,
+      priority: priority,
     );
+
     Navigator.pop(context, newTask);
   }
 
@@ -300,7 +340,6 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12),
               ),
             ),
             SizedBox(height: 16),
@@ -316,10 +355,6 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
               ),
             ),
             SizedBox(height: 16),
@@ -329,11 +364,6 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
             ),
             DropdownButtonFormField<String>(
               value: priority,
-              decoration: InputDecoration(
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
               onChanged: (value) => setState(() => priority = value!),
               items: ['High', 'Medium', 'Low']
                   .map(
@@ -341,6 +371,11 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
                         DropdownMenuItem(value: level, child: Text(level)),
                   )
                   .toList(),
+              decoration: InputDecoration(
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
             ),
             SizedBox(height: 24),
             Center(
@@ -350,9 +385,6 @@ class _AddEditTaskScreenState extends State<AddEditTaskScreen> {
                   backgroundColor: Colors.blue,
                   foregroundColor: Colors.white,
                   minimumSize: Size(double.infinity, 48),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
                 ),
                 child: Text(
                   widget.task == null ? "Save Task" : "Update Task",
